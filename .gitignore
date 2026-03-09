@@ -3,15 +3,17 @@ annotations/
 results/
 external/
 build/
+__pycache__/
+
 *.egg-info
 .DS_Store
 
-pyytvistools/__init__.pyc
-pyytvistools/_mask.c
-pyytvistools/_mask.so
-pyytvistools/coco.pyc
-pyytvistools/cocoeval.pyc
-pyytvistools/mask.pyc
+pyvistools/__init__.pyc
+pyvistools/_mask.c
+pyvistools/_mask.so
+pyvistools/coco.pyc
+pyvistools/cocoeval.pyc
+pyvistools/mask.pyc
 
 .idea/
 .vscode/

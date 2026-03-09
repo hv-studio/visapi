@@ -216,7 +216,7 @@ class OVIS:
 
         print('Loading and preparing results...')
         tic = time.time()
-        if type(resFile) == str or type(resFile) == unicode:
+        if type(resFile) == str or (PYTHON_VERSION == 2 and type(resFile) == unicode):
             anns = json.load(open(resFile))
         elif type(resFile) == np.ndarray:
             anns = self.loadNumpyAnnotations(resFile)
@@ -247,7 +247,7 @@ class OVIS:
                 if len(l)==0:
                   ann['avg_area'] = 0
                 else:
-                  ann['avg_area'] = np.array(l).mean() 
+                  ann['avg_area'] = np.array(l).mean()
                 ann['iscrowd'] = 0
         print('DONE (t={:0.2f}s)'.format(time.time()- tic))
 

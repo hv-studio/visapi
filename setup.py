@@ -20,7 +20,7 @@ setup(
     install_requires=[
         'setuptools>=18.0',
         'cython>=0.27.3',
-        'matplotlib>=2.1.0'
+        'matplotlib>=2.1.0',
         'numpy>=2.0.0',
     ],
     version='2.0.1',

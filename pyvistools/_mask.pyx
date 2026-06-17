@@ -47,7 +47,7 @@ cdef extern from "maskApi.h":
     void bbIou( BB dt, BB gt, siz m, siz n, byte *iscrowd, double *o ) nogil
     void rleToBbox( const RLE *R, BB bb, siz n ) nogil
     void rleFrBbox( RLE *R, const BB bb, siz h, siz w, siz n ) nogil
-    void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w )
+    void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w ) nogil
     char* rleToString( const RLE *R ) nogil
     void rleFrString( RLE *R, char *s, siz h, siz w ) nogil
 
@@ -275,11 +275,15 @@ def frBbox(np.ndarray[np.double_t, ndim=2] bb, siz h, siz w ):
 
 def frPoly( poly, siz h, siz w ):
     cdef np.ndarray[np.double_t, ndim=1] np_poly
+    cdef siz c_i, k
     n = len(poly)
     Rs = RLEs(n)
     for i, p in enumerate(poly):
         np_poly = np.array(p, dtype=np.double, order='F')
-        rleFrPoly( <RLE*>&Rs._R[i], <const double*> np_poly.data, int(len(p)/2), h, w )
+        c_i = i
+        k = int(len(p)/2)
+        with nogil:
+            rleFrPoly( <RLE*>&Rs._R[c_i], <const double*> np_poly.data, k, h, w )
     objs = _toString(Rs)
     return objs
 

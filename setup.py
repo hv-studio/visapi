@@ -23,6 +23,6 @@ setup(
         'matplotlib>=2.1.0',
         'numpy>=2.0.0',
     ],
-    version='2.0.1',
+    version='2.0.0+hvstudio.1',
     ext_modules= ext_modules
 )

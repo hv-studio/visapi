@@ -39,7 +39,7 @@ cdef extern from "maskApi.h":
         siz m,
         uint* cnts,
     void rlesInit( RLE **R, siz n )
-    void rleEncode( RLE *R, const byte *M, siz h, siz w, siz n )
+    void rleEncode( RLE *R, const byte *M, siz h, siz w, siz n ) nogil
     void rleDecode( const RLE *R, byte *mask, siz n )
     void rleMerge( const RLE *R, RLE *M, siz n, int intersect )
     void rleArea( const RLE *R, siz n, uint *a )
@@ -137,7 +137,8 @@ def _frString(rleObjs):
 def encode(np.ndarray[np.uint8_t, ndim=3, mode='fortran'] mask):
     h, w, n = mask.shape[0], mask.shape[1], mask.shape[2]
     cdef RLEs Rs = RLEs(n)
-    rleEncode(Rs._R,<byte*>mask.data,h,w,n)
+    with nogil:
+        rleEncode(Rs._R,<byte*>mask.data,h,w,n)
     objs = _toString(Rs)
     return objs
 

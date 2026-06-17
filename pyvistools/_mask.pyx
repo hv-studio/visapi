@@ -43,8 +43,8 @@ cdef extern from "maskApi.h":
     void rleDecode( const RLE *R, byte *mask, siz n ) nogil
     void rleMerge( const RLE *R, RLE *M, siz n, int intersect ) nogil
     void rleArea( const RLE *R, siz n, uint *a ) nogil
-    void rleIou( RLE *dt, RLE *gt, siz m, siz n, byte *iscrowd, double *o )
-    void bbIou( BB dt, BB gt, siz m, siz n, byte *iscrowd, double *o )
+    void rleIou( RLE *dt, RLE *gt, siz m, siz n, byte *iscrowd, double *o ) nogil
+    void bbIou( BB dt, BB gt, siz m, siz n, byte *iscrowd, double *o ) nogil
     void rleToBbox( const RLE *R, BB bb, siz n ) nogil
     void rleFrBbox( RLE *R, const BB bb, siz h, siz w, siz n ) nogil
     void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w )
@@ -198,10 +198,6 @@ def iou( dt, gt, pyiscrowd ):
         else:
             raise Exception('unrecognized type.  The following type: RLEs (rle), np.ndarray (box), and list (box) are supported.')
         return objs
-    def _rleIou(RLEs dt, RLEs gt, np.ndarray[np.uint8_t, ndim=1] iscrowd, siz m, siz n, np.ndarray[np.double_t,  ndim=1] _iou):
-        rleIou( <RLE*> dt._R, <RLE*> gt._R, m, n, <byte*> iscrowd.data, <double*> _iou.data )
-    def _bbIou(np.ndarray[np.double_t, ndim=2] dt, np.ndarray[np.double_t, ndim=2] gt, np.ndarray[np.uint8_t, ndim=1] iscrowd, siz m, siz n, np.ndarray[np.double_t, ndim=1] _iou):
-        bbIou( <BB> dt.data, <BB> gt.data, m, n, <byte*> iscrowd.data, <double*>_iou.data )
     def _len(obj):
         cdef siz N = 0
         if type(obj) == RLEs:
@@ -227,19 +223,28 @@ def iou( dt, gt, pyiscrowd ):
     # define local variables
     cdef double* _iou = <double*> 0
     cdef np.npy_intp shape[1]
-    # check type and assign iou function
-    if type(dt) == RLEs:
-        _iouFun = _rleIou
-    elif type(dt) == np.ndarray:
-        _iouFun = _bbIou
-    else:
-        raise Exception('input data type not allowed.')
+    cdef RLE* rle_dt
+    cdef RLE* rle_gt
+    cdef BB bb_dt
+    cdef BB bb_gt
+    cdef byte* iscrowd_data = <byte*> iscrowd.data
     _iou = <double*> malloc(m*n* sizeof(double))
     iou = np.zeros((m*n, ), dtype=np.double)
     shape[0] = <np.npy_intp> m*n
     iou = np.PyArray_SimpleNewFromData(1, shape, np.NPY_DOUBLE, _iou)
     PyArray_ENABLEFLAGS(iou, np.NPY_ARRAY_OWNDATA)
-    _iouFun(dt, gt, iscrowd, m, n, iou)
+    if type(dt) == RLEs:
+        rle_dt = (<RLEs> dt)._R
+        rle_gt = (<RLEs> gt)._R
+        with nogil:
+            rleIou( rle_dt, rle_gt, m, n, iscrowd_data, _iou )
+    elif type(dt) == np.ndarray:
+        bb_dt = <BB> (<np.ndarray> dt).data
+        bb_gt = <BB> (<np.ndarray> gt).data
+        with nogil:
+            bbIou( bb_dt, bb_gt, m, n, iscrowd_data, _iou )
+    else:
+        raise Exception('input data type not allowed.')
     return iou.reshape((m,n), order='F')
 
 def toBbox( rleObjs ):

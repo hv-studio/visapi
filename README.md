@@ -1,15 +1,12 @@
-# OVIS data loading and evaluation
+# VIS data loading and evaluation
 ## Introduction
 
-This package provides data loading and evaluation functionalities for video instance segmentation on [OVIS](http://songbai.site/ovis/). It is built based on [COCO API](https://github.com/cocodataset/cocoapi) designed for [MSCOCO](http://cocodataset.org/) and [COCO API (YouTube-VIS)](https://github.com/youtubevos/cocoapi) designed for [YouTube-VIS](https://youtube-vos.org/dataset/vis/). For evaluation metrics, please refer to the [YouTube-VIS](https://youtube-vos.org/dataset/vis/) and [OVIS challenge paper](https://openreview.net/pdf?id=IfzTefIU_3j) for details.
-
-We have only implemented Python API for OVIS. API in other languages are not available for now.
+This package provides data loading and evaluation functionalities for video instance segmentation on OVIS and Youtube-VIS.
+It is built upon [OVIS](https://github.com/qjy981010/cocoapi).
 
 ## Installation
 To install:
 ```
-cd PythonAPI
-
 # To compile and install locally 
 python setup.py build_ext --inplace
 

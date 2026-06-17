@@ -40,13 +40,13 @@ cdef extern from "maskApi.h":
         uint* cnts,
     void rlesInit( RLE **R, siz n )
     void rleEncode( RLE *R, const byte *M, siz h, siz w, siz n ) nogil
-    void rleDecode( const RLE *R, byte *mask, siz n )
-    void rleMerge( const RLE *R, RLE *M, siz n, int intersect )
-    void rleArea( const RLE *R, siz n, uint *a )
+    void rleDecode( const RLE *R, byte *mask, siz n ) nogil
+    void rleMerge( const RLE *R, RLE *M, siz n, int intersect ) nogil
+    void rleArea( const RLE *R, siz n, uint *a ) nogil
     void rleIou( RLE *dt, RLE *gt, siz m, siz n, byte *iscrowd, double *o )
     void bbIou( BB dt, BB gt, siz m, siz n, byte *iscrowd, double *o )
-    void rleToBbox( const RLE *R, BB bb, siz n )
-    void rleFrBbox( RLE *R, const BB bb, siz h, siz w, siz n )
+    void rleToBbox( const RLE *R, BB bb, siz n ) nogil
+    void rleFrBbox( RLE *R, const BB bb, siz h, siz w, siz n ) nogil
     void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w )
     char* rleToString( const RLE *R )
     void rleFrString( RLE *R, char *s, siz h, siz w )
@@ -147,20 +147,23 @@ def decode(rleObjs):
     cdef RLEs Rs = _frString(rleObjs)
     h, w, n = Rs._R[0].h, Rs._R[0].w, Rs._n
     masks = Masks(h, w, n)
-    rleDecode(<RLE*>Rs._R, masks._mask, n);
+    with nogil:
+        rleDecode(<RLE*>Rs._R, masks._mask, n)
     return np.array(masks)
 
-def merge(rleObjs, intersect=0):
+def merge(rleObjs, int intersect=0):
     cdef RLEs Rs = _frString(rleObjs)
     cdef RLEs R = RLEs(1)
-    rleMerge(<RLE*>Rs._R, <RLE*> R._R, <siz> Rs._n, intersect)
+    with nogil:
+        rleMerge(<RLE*>Rs._R, <RLE*> R._R, <siz> Rs._n, intersect)
     obj = _toString(R)[0]
     return obj
 
 def area(rleObjs):
     cdef RLEs Rs = _frString(rleObjs)
     cdef uint* _a = <uint*> malloc(Rs._n* sizeof(uint))
-    rleArea(Rs._R, Rs._n, _a)
+    with nogil:
+        rleArea(Rs._R, Rs._n, _a)
     cdef np.npy_intp shape[1]
     shape[0] = <np.npy_intp> Rs._n
     a = np.array((Rs._n, ), dtype=np.uint8)
@@ -243,7 +246,8 @@ def toBbox( rleObjs ):
     cdef RLEs Rs = _frString(rleObjs)
     cdef siz n = Rs.n
     cdef BB _bb = <BB> malloc(4*n* sizeof(double))
-    rleToBbox( <const RLE*> Rs._R, _bb, n )
+    with nogil:
+        rleToBbox( <const RLE*> Rs._R, _bb, n )
     cdef np.npy_intp shape[1]
     shape[0] = <np.npy_intp> 4*n
     bb = np.array((1,4*n), dtype=np.double)
@@ -254,7 +258,8 @@ def toBbox( rleObjs ):
 def frBbox(np.ndarray[np.double_t, ndim=2] bb, siz h, siz w ):
     cdef siz n = bb.shape[0]
     Rs = RLEs(n)
-    rleFrBbox( <RLE*> Rs._R, <const BB> bb.data, h, w, n )
+    with nogil:
+        rleFrBbox( <RLE*> Rs._R, <const BB> bb.data, h, w, n )
     objs = _toString(Rs)
     return objs
 

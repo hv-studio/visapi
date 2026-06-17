@@ -48,8 +48,8 @@ cdef extern from "maskApi.h":
     void rleToBbox( const RLE *R, BB bb, siz n ) nogil
     void rleFrBbox( RLE *R, const BB bb, siz h, siz w, siz n ) nogil
     void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w )
-    char* rleToString( const RLE *R )
-    void rleFrString( RLE *R, char *s, siz h, siz w )
+    char* rleToString( const RLE *R ) nogil
+    void rleFrString( RLE *R, char *s, siz h, siz w ) nogil
 
 # python class to wrap RLE array in C
 # the class handles the memory allocation and deallocation
@@ -106,7 +106,8 @@ def _toString(RLEs Rs):
     cdef char* c_string
     objs = []
     for i in range(n):
-        c_string = rleToString( <RLE*> &Rs._R[i] )
+        with nogil:
+            c_string = rleToString( <RLE*> &Rs._R[i] )
         py_string = c_string
         objs.append({
             'size': [Rs._R[i].h, Rs._R[i].w],
@@ -121,6 +122,7 @@ def _frString(rleObjs):
     Rs = RLEs(n)
     cdef bytes py_string
     cdef char* c_string
+    cdef siz h, w, c_i
     for i, obj in enumerate(rleObjs):
         if PYTHON_VERSION == 2:
             py_string = str(obj['counts']).encode('utf8')
@@ -129,7 +131,10 @@ def _frString(rleObjs):
         else:
             raise Exception('Python version must be 2 or 3')
         c_string = py_string
-        rleFrString( <RLE*> &Rs._R[i], <char*> c_string, obj['size'][0], obj['size'][1] )
+        h, w = obj['size'][0], obj['size'][1]
+        c_i = i
+        with nogil:
+            rleFrString( <RLE*> &Rs._R[c_i], <char*> c_string, h, w )
     return Rs
 
 # encode mask to RLEs objects

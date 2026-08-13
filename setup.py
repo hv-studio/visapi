@@ -9,7 +9,6 @@ ext_modules = [
         'pyvistools._mask',
         sources=['./common/maskApi.c', 'pyvistools/_mask.pyx'],
         include_dirs = [np.get_include(), './common'],
-        extra_compile_args=['-Wno-cpp', '-Wno-unused-function', '-std=c99'],
     )
 ]
 
@@ -23,6 +22,6 @@ setup(
         'matplotlib>=2.1.0',
         'numpy>=2.0.0',
     ],
-    version='2.0.0+hvstudio.1',
+    version='2.0.0+hvstudio.2',
     ext_modules= ext_modules
 )

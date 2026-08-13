@@ -13,3 +13,5 @@ __pycache__/
 
 .idea/
 .vscode/
+
+pyvistools/_mask.c

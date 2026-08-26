@@ -42,7 +42,7 @@ class YTVOS:
     def __init__(self, annotation_file=None):
         """
         Constructor of Microsoft COCO helper class for reading and visualizing annotations.
-        :param annotation_file (str): location of annotation file
+        :param annotation_file (str | dict): location or loaded annotations
         :param image_folder (str): location to the folder that hosts images.
         :return:
         """
@@ -52,7 +52,10 @@ class YTVOS:
         if not annotation_file == None:
             print('loading annotations into memory...')
             tic = time.time()
-            dataset = json.load(open(annotation_file, 'r'))
+            if isinstance(annotation_file, dict):
+                dataset = annotation_file
+            else:
+                dataset = json.load(open(annotation_file, 'r'))
             assert type(dataset)==dict, 'annotation file format {} not supported'.format(type(dataset))
             print('Done (t={:0.2f}s)'.format(time.time()- tic))
             self.dataset = dataset
@@ -223,10 +226,10 @@ class YTVOS:
         annsVidIds = [ann['video_id'] for ann in anns]
         assert set(annsVidIds) == (set(annsVidIds) & set(self.getVidIds())), \
                'Results do not correspond to current coco set'
-        if 'segmentations' in anns[0]:
-            res.dataset['categories'] = copy.deepcopy(self.dataset['categories'])
-            for id, ann in enumerate(anns):
-                ann['areas'] = []
+        res.dataset['categories'] = copy.deepcopy(self.dataset['categories'])
+        for id, ann in enumerate(anns):
+            ann['areas'] = []
+            if 'segmentations' in ann:
                 if not 'bboxes' in ann:
                     ann['bboxes'] = []
                 for seg in ann['segmentations']:
@@ -239,13 +242,16 @@ class YTVOS:
                         ann['areas'].append(None)
                         if len(ann['bboxes']) < len(ann['areas']):
                             ann['bboxes'].append(None)
-                ann['id'] = id+1
-                l = [a for a in ann['areas'] if a]
-                if len(l)==0:
-                  ann['avg_area'] = 0
-                else:
-                  ann['avg_area'] = np.array(l).mean()
-                ann['iscrowd'] = 0
+            elif 'bboxes' in ann:
+                for bbox in ann['bboxes']:
+                    ann['areas'].append(bbox[2] * bbox[3] if bbox else None)
+            ann['id'] = id+1
+            l = [a for a in ann['areas'] if a]
+            if len(l)==0:
+              ann['avg_area'] = 0
+            else:
+              ann['avg_area'] = np.array(l).mean()
+            ann['iscrowd'] = 0
         print('DONE (t={:0.2f}s)'.format(time.time()- tic))
 
         res.dataset['annotations'] = anns

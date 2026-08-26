@@ -99,6 +99,14 @@ class YTVOSeval:
                   ann['avg_area'] = 0
                 else:
                   ann['avg_area'] = np.array(l).mean()
+        def _toBbox(anns):
+            for ann in anns:
+                ann['areas'] = [bbox[2] * bbox[3] if bbox else None for bbox in ann['bboxes']]
+                l = [a for a in ann['areas'] if a]
+                if len(l)==0:
+                  ann['avg_area'] = 0
+                else:
+                  ann['avg_area'] = np.array(l).mean()
         p = self.params
         if p.useCats:
             gts=self.cocoGt.loadAnns(self.cocoGt.getAnnIds(vidIds=p.vidIds, catIds=p.catIds))
@@ -111,6 +119,9 @@ class YTVOSeval:
         if p.iouType == 'segm':
             _toMask(gts, self.cocoGt)
             _toMask(dts, self.cocoDt)
+        elif p.iouType == 'bbox':
+            _toBbox(gts)
+            _toBbox(dts)
         # set ignore flag
         for gt in gts:
             gt['ignore'] = gt['ignore'] if 'ignore' in gt else 0
@@ -188,34 +199,22 @@ class YTVOSeval:
         if p.iouType == 'segm':
             g = [g['segmentations'] for g in gt]
             d = [d['segmentations'] for d in dt]
+            iou_seq = _segm_seq_iou
         elif p.iouType == 'bbox':
             g = [g['bboxes'] for g in gt]
             d = [d['bboxes'] for d in dt]
+            iou_seq = _bbox_seq_iou
         else:
             raise Exception('unknown iouType for iou computation')
 
         # compute iou between each dt and gt region
-        iscrowd = [int(o['iscrowd']) for o in gt]
-        #ious = maskUtils.iou(d,g,iscrowd)
-        def iou_seq(d_seq, g_seq):
-            i = .0
-            u = .0
-            for d, g in zip(d_seq, g_seq):
-                if d and g:
-                    i += maskUtils.area(maskUtils.merge([d, g], True))
-                    u += maskUtils.area(maskUtils.merge([d, g], False))
-                elif not d and g:
-                    u += maskUtils.area(g)
-                elif d and not g:
-                    u += maskUtils.area(d)
-            if not u > .0:
-                print("Mask sizes in video {} and category {} may not match!".format(vidId, catId))
-            iou = i / u if u > .0 else .0
-            return iou
         ious = np.zeros([len(d), len(g)])
         for i, j in np.ndindex(ious.shape):
-            ious[i, j] = iou_seq(d[i], g[j])
-        #print(vidId, catId, ious.shape, ious)
+            iou = iou_seq(d[i], g[j])
+            if iou is None:
+                print("Mask sizes in video {} and category {} may not match!".format(vidId, catId))
+                iou = .0
+            ious[i, j] = iou
         return ious
 
     def computeOks(self, imgId, catId):
@@ -523,6 +522,40 @@ class YTVOSeval:
 
     def __str__(self):
         self.summarize()
+
+
+def _segm_seq_iou(d_seq, g_seq):
+    i = .0
+    u = .0
+    for d, g in zip(d_seq, g_seq):
+        if d and g:
+            i += maskUtils.area(maskUtils.merge([d, g], True))
+            u += maskUtils.area(maskUtils.merge([d, g], False))
+        elif not d and g:
+            u += maskUtils.area(g)
+        elif d and not g:
+            u += maskUtils.area(d)
+    return i / u if u > .0 else None
+
+
+def _bbox_seq_iou(d_seq, g_seq):
+    i = .0
+    u = .0
+    for d, g in zip(d_seq, g_seq):
+        if d and g:
+            d_area = d[2] * d[3]
+            g_area = g[2] * g[3]
+            w = max(min(d[0] + d[2], g[0] + g[2]) - max(d[0], g[0]), 0)
+            h = max(min(d[1] + d[3], g[1] + g[3]) - max(d[1], g[1]), 0)
+            inter = w * h
+            i += inter
+            u += d_area + g_area - inter
+        elif not d and g:
+            u += g[2] * g[3]
+        elif d and not g:
+            u += d[2] * d[3]
+    return i / u if u > .0 else None
+
 
 class Params:
     '''

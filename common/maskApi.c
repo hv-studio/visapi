@@ -5,8 +5,11 @@
 * Licensed under the Simplified BSD License [see coco/license.txt]
 **************************************************************************/
 #include "maskApi.h"
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 uint umin( uint a, uint b ) { return (a<b) ? a : b; }
 uint umax( uint a, uint b ) { return (a>b) ? a : b; }
@@ -67,6 +70,79 @@ void rleMerge( const RLE *R, RLE *M, siz n, int intersect ) {
     rleFree(&A);
   }
   rleInit(M,h,w,m,cnts); free(cnts);
+}
+
+/* Append a nonempty run, coalescing adjacent runs of the same value. */
+static int rlePadAppend( RLE *R, siz *capacity, siz count, int value ) {
+  siz limit=ULONG_MAX, next;
+  uint *cnts;
+  if(SIZE_MAX/sizeof(uint)<limit) limit=(siz)(SIZE_MAX/sizeof(uint));
+  if(!count) return RLE_OK;
+  if(count>UINT_MAX) return RLE_OVERFLOW;
+  if((R->m-1)%2==(siz)value) {
+    if(count>UINT_MAX-R->cnts[R->m-1]) return RLE_OVERFLOW;
+    R->cnts[R->m-1]+=(uint)count;
+    return RLE_OK;
+  }
+  if(R->m==*capacity) {
+    if(*capacity>=limit) return RLE_OVERFLOW;
+    next=(*capacity>limit/2) ? limit : *capacity*2;
+    cnts=realloc(R->cnts,next*sizeof(uint));
+    if(!cnts) return RLE_NOMEM;
+    R->cnts=cnts; *capacity=next;
+  }
+  R->cnts[R->m++]=(uint)count;
+  return RLE_OK;
+}
+
+int rlePad( const RLE *R, RLE *M, siz h, siz w, siz x, siz y ) {
+  siz i, area, sourceArea, pos=0, end=0, capacity=8;
+  RLE out;
+  int status;
+  if(!R || !M || R==M || (R->m && !R->cnts)) return RLE_INVALID;
+  if((h && w>ULONG_MAX/h) || (R->h && R->w>ULONG_MAX/R->h))
+    return RLE_OVERFLOW;
+  if(x>w || y>h || R->w>w-x || R->h>h-y) return RLE_INVALID;
+  area=h*w; sourceArea=R->h*R->w;
+  for(i=0; i<R->m; i++) {
+    if(R->cnts[i]>sourceArea-pos) return RLE_INVALID;
+    pos+=R->cnts[i];
+  }
+  if(pos!=sourceArea) return RLE_INVALID;
+  out.h=h; out.w=w; out.m=1;
+  out.cnts=malloc(capacity*sizeof(uint));
+  if(!out.cnts) return RLE_NOMEM;
+  out.cnts[0]=0;
+  pos=0;
+  for(i=0; i<R->m; i++) {
+    siz count=R->cnts[i];
+    if(!(i%2)) { pos+=count; continue; }
+    while(count) {
+      siz start, length;
+      if(h==R->h) {
+        /* No vertical padding: even a run spanning many columns stays
+         * contiguous. This also makes full-canvas passthrough O(runs). */
+        start=x*h+pos; length=count;
+      } else {
+        siz row=pos%R->h, col=pos/R->h;
+        start=(x+col)*h+y+row;
+        length=R->h-row;
+        if(length>count) length=count;
+      }
+      status=rlePadAppend(&out,&capacity,start-end,0);
+      if(status!=RLE_OK) goto fail;
+      status=rlePadAppend(&out,&capacity,length,1);
+      if(status!=RLE_OK) goto fail;
+      end=start+length; pos+=length; count-=length;
+    }
+  }
+  status=rlePadAppend(&out,&capacity,area-end,0);
+  if(status!=RLE_OK) goto fail;
+  *M=out;
+  return RLE_OK;
+fail:
+  free(out.cnts);
+  return status;
 }
 
 void rleArea( const RLE *R, siz n, uint *a ) {
@@ -203,29 +279,53 @@ void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w ) {
 
 char* rleToString( const RLE *R ) {
   /* Similar to LEB128 but using 6 bits/char and ascii chars 48-111. */
-  siz i, m=R->m, p=0; long x; int more;
-  char *s=malloc(sizeof(char)*m*6);
+  siz i, m=R->m;
+  size_t p=0, charsPerCount=(sizeof(uint)*CHAR_BIT+1+4)/5;
+  int64_t x; int more;
+  char *s;
+  if(m>(SIZE_MAX-1)/charsPerCount) return NULL;
+  s=malloc(m*charsPerCount+1);
+  if(!s) return NULL;
   for( i=0; i<m; i++ ) {
-    x=(long) R->cnts[i]; if(i>2) x-=(long) R->cnts[i-2]; more=1;
+    x=(int64_t) R->cnts[i]; if(i>2) x-=(int64_t) R->cnts[i-2]; more=1;
     while( more ) {
       char c=x & 0x1f; x >>= 5; more=(c & 0x10) ? x!=-1 : x!=0;
-      if(more) c |= 0x20; c+=48; s[p++]=c;
+      if(more) c |= 0x20;
+      c+=48; s[p++]=c;
     }
   }
   s[p]=0; return s;
 }
 
-void rleFrString( RLE *R, char *s, siz h, siz w ) {
-  siz m=0, p=0, k; long x; int more; uint *cnts;
-  while( s[m] ) m++; cnts=malloc(sizeof(uint)*m); m=0;
+int rleFrString( RLE *R, const char *s, siz h, siz w ) {
+  siz m=0, p=0, k;
+  size_t length=strlen(s);
+  int64_t x;
+  int more, status=RLE_INVALID;
+  uint *cnts;
+  if(length>ULONG_MAX || length>SIZE_MAX/sizeof(uint)) return RLE_OVERFLOW;
+  cnts=length ? malloc(sizeof(uint)*length) : NULL;
+  if(length && !cnts) return RLE_NOMEM;
   while( s[p] ) {
     x=0; k=0; more=1;
     while( more ) {
-      char c=s[p]-48; x |= (c & 0x1f) << 5*k;
+      unsigned char c=(unsigned char)s[p];
+      if(c<48 || c>111) goto fail;
+      if(k>=(sizeof(uint)*CHAR_BIT+1+4)/5) {
+        status=RLE_OVERFLOW; goto fail;
+      }
+      c-=48; x |= (int64_t)(c & 0x1f) << (5*k);
       more = c & 0x20; p++; k++;
-      if(!more && (c & 0x10)) x |= -1 << 5*k;
+      if(!more && (c & 0x10)) x -= (int64_t)1 << (5*k);
     }
-    if(m>2) x+=(long) cnts[m-2]; cnts[m++]=(uint) x;
+    if(m>2) x+=(int64_t) cnts[m-2];
+    if(x<0) goto fail;
+    if(x>UINT_MAX) { status=RLE_OVERFLOW; goto fail; }
+    cnts[m++]=(uint)x;
   }
-  rleInit(R,h,w,m,cnts); free(cnts);
+  R->h=h; R->w=w; R->m=m; R->cnts=cnts;
+  return RLE_OK;
+fail:
+  free(cnts);
+  return status;
 }

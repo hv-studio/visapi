@@ -133,6 +133,7 @@ def test_cython_emits_gil_release_for_mask_api_calls(tmp_path):
         "rleEncode",
         "rleDecode",
         "rleMerge",
+        "rlePad",
         "rleArea",
         "rleIou",
         "bbIou",

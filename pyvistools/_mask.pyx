@@ -181,21 +181,12 @@ def merge(rleObjs, int intersect=0):
     return obj
 
 def pad(rle, size, offset):
-    cdef siz h, w, x, y, roi_h, roi_w
-    cdef uint count
+    cdef siz h, w, x, y
     cdef RLEs source
     cdef RLEs result = RLEs(1)
     cdef int status
     h, w = map(index, size)
     x, y = map(index, offset)
-    roi_h, roi_w = map(index, rle['size'])
-    if type(rle['counts']) not in (bytes, str):
-        counts = []
-        for value in rle['counts']:
-            # Convert before NumPy's uint32 cast can truncate an invalid count.
-            count = index(value)
-            counts.append(count)
-        rle = frUncompressedRLE([{'size': [roi_h, roi_w], 'counts': counts}], roi_h, roi_w)[0]
     source = _frString([rle])
     with nogil:
         status = rlePad(source._R, result._R, h, w, x, y)

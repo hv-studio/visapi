@@ -50,15 +50,9 @@ def compressed_counts(counts):
 
 
 def make_rle(bitmap, encoding):
-    counts = counts_from_bitmap(bitmap)
-    if encoding == "bytes":
-        counts = compressed_counts(counts)
-    elif encoding == "str":
-        counts = compressed_counts(counts).decode("ascii")
-    elif encoding == "array":
-        counts = np.array(counts, dtype=np.int64)
-    elif encoding == "tuple":
-        counts = tuple(counts)
+    counts = compressed_counts(counts_from_bitmap(bitmap))
+    if encoding == "str":
+        counts = counts.decode("ascii")
     return {"size": list(bitmap.shape), "counts": counts}
 
 
@@ -80,7 +74,7 @@ def assert_pad_matches_bitmap(mask_utils, roi, size, offset, encoding):
     assert np.array_equal(rle["counts"], original["counts"])
 
 
-@pytest.mark.parametrize("encoding", ["bytes", "str", "list", "tuple", "array"])
+@pytest.mark.parametrize("encoding", ["bytes", "str"])
 @pytest.mark.parametrize(
     "roi",
     [
@@ -117,23 +111,35 @@ def test_pad_randomized(mask_utils):
         dh, dw = map(int, rng.integers(0, 8, size=2))
         roi = (rng.random((h, w)) < rng.random()).astype(np.uint8)
         offset = (int(rng.integers(dw + 1)), int(rng.integers(dh + 1)))
-        for encoding in ("list", "bytes", "str"):
+        for encoding in ("bytes", "str"):
             assert_pad_matches_bitmap(mask_utils, roi, (h + dh, w + dw), offset, encoding)
 
 
 @pytest.mark.parametrize("counts", [[], [0], [0, 0, 0]])
 @pytest.mark.parametrize("shape", [(0, 0), (0, 3), (3, 0)])
 def test_pad_empty_counts(mask_utils, counts, shape):
-    for encoded in (counts, compressed_counts(counts), compressed_counts(counts).decode("ascii")):
+    for encoded in (compressed_counts(counts), compressed_counts(counts).decode("ascii")):
         rle = {"size": shape, "counts": encoded}
         assert mask_utils.pad(rle, (3, 3), (0, 0)) == {"size": [3, 3], "counts": b"9"}
 
 
 def test_pad_coalesces_runs_separated_by_zero_counts(mask_utils):
     for counts, expected in [([0, 2, 0, 4, 0], [0, 6]), ([2, 0, 4, 0], [6])]:
-        for encoded in (counts, compressed_counts(counts)):
+        for encoded in (compressed_counts(counts), compressed_counts(counts).decode("ascii")):
             result = mask_utils.pad({"size": [2, 3], "counts": encoded}, (2, 3), (0, 0))
             assert result["counts"] == compressed_counts(expected)
+
+
+@pytest.mark.parametrize("counts", [[1, 4, 1], (1, 4, 1), np.array([1, 4, 1])])
+def test_pad_uncompressed_counts_require_explicit_conversion(mask_utils, counts):
+    rle = {"size": [2, 3], "counts": counts}
+    with pytest.raises(TypeError):
+        mask_utils.pad(rle, (5, 6), (1, 1))
+    encoded = mask_utils.frPyObjects(rle, 2, 3)
+    result = mask_utils.pad(encoded, (5, 6), (1, 1))
+    expected = np.zeros((5, 6), dtype=np.uint8)
+    expected[1:3, 1:4] = [[0, 1, 1], [1, 1, 0]]
+    assert np.array_equal(mask_utils.decode(result), expected)
 
 
 @pytest.mark.parametrize("size,offset", [((2, 3), (1, 0)), ((2, 3), (0, 1)),
@@ -143,30 +149,29 @@ def test_pad_coalesces_runs_separated_by_zero_counts(mask_utils):
 def test_pad_rejects_out_of_bounds(mask_utils, size, offset):
     error = OverflowError if min(*size, *offset) < 0 else ValueError
     with pytest.raises(error):
-        mask_utils.pad({"size": [2, 3], "counts": [6]}, size, offset)
+        mask_utils.pad({"size": [2, 3], "counts": b"6"}, size, offset)
 
 
 @pytest.mark.parametrize("size,offset", [((4.0, 5), (0, 0)), ((4, 5), (0.5, 0)),
     ((4, 5), (0, "1"))])
 def test_pad_rejects_noninteger_geometry(mask_utils, size, offset):
     with pytest.raises(TypeError):
-        mask_utils.pad({"size": [2, 3], "counts": [6]}, size, offset)
+        mask_utils.pad({"size": [2, 3], "counts": b"6"}, size, offset)
 
 
 def test_pad_accepts_numpy_integer_geometry(mask_utils):
     assert_pad_matches_bitmap(mask_utils, np.ones((2, 3), dtype=np.uint8),
-        np.array([4, 5], dtype=np.int64), (np.int32(2), np.int64(1)), "array")
+        np.array([4, 5], dtype=np.int64), (np.int32(2), np.int64(1)), "bytes")
 
 
 @pytest.mark.parametrize("rle,size,offset,error", [
     ([], (3, 3), (0, 0), TypeError),
     ({"size": [2, 3]}, (3, 3), (0, 0), KeyError),
-    ({"size": [2, 3], "counts": [6]}, (3,), (0, 0), ValueError),
-    ({"size": [2, 3], "counts": [6]}, (3, 3), (0, 0, 0), ValueError),
-    ({"size": [-2, 3], "counts": []}, (3, 3), (0, 0), OverflowError),
-    ({"size": [2.0, 3], "counts": [6]}, (3, 3), (0, 0), TypeError),
-    ({"size": [0, 0], "counts": []}, (3, 3), (4, 0), ValueError),
-    ({"size": [0, 4], "counts": []}, (3, 3), (0, 0), ValueError),
+    ({"size": [2, 3], "counts": b"6"}, (3,), (0, 0), ValueError),
+    ({"size": [2, 3], "counts": b"6"}, (3, 3), (0, 0, 0), ValueError),
+    ({"size": [-2, 3], "counts": b""}, (3, 3), (0, 0), OverflowError),
+    ({"size": [0, 0], "counts": b""}, (3, 3), (4, 0), ValueError),
+    ({"size": [0, 4], "counts": b""}, (3, 3), (0, 0), ValueError),
 ])
 def test_pad_rejects_invalid_structure(mask_utils, rle, size, offset, error):
     with pytest.raises(error):
@@ -174,9 +179,7 @@ def test_pad_rejects_invalid_structure(mask_utils, rle, size, offset, error):
 
 
 @pytest.mark.parametrize("counts,error", [
-    ([-1, 7], OverflowError), ([6.0], TypeError), (["6"], TypeError),
-    ([UINT_MAX + 1], OverflowError), (None, TypeError),
-    ([], ValueError), ([5], ValueError), ([7], ValueError),
+    (None, TypeError),
     (b"5", ValueError), (b"7", ValueError), (b"", ValueError),
     (b"P", ValueError), (b"/", ValueError), (b"p", ValueError),
     ("\u00e9", ValueError),
@@ -191,20 +194,20 @@ def test_pad_rejects_invalid_counts(mask_utils, counts, error):
 
 
 def test_pad_dimension_overflow(mask_utils):
-    empty = {"size": [0, 0], "counts": []}
+    empty = {"size": [0, 0], "counts": b""}
     for size, offset in [((SIZ_MAX + 1, 0), (0, 0)), ((2, SIZ_MAX), (0, 0)),
                          ((0, 0), (SIZ_MAX + 1, 0))]:
         with pytest.raises(OverflowError):
             mask_utils.pad(empty, size, offset)
     with pytest.raises(OverflowError):
-        mask_utils.pad({"size": [SIZ_MAX, 2], "counts": []}, (0, 0), (0, 0))
+        mask_utils.pad({"size": [SIZ_MAX, 2], "counts": b""}, (0, 0), (0, 0))
 
 
 @pytest.mark.parametrize("size", [(1, MAX_PIXELS), (MAX_PIXELS, 1)])
 @pytest.mark.parametrize("foreground", [False, True])
 def test_pad_pixel_limit_with_existing_consumers(mask_utils, size, foreground):
     counts = [0, MAX_PIXELS] if foreground else [MAX_PIXELS]
-    for encoded in (counts, compressed_counts(counts), compressed_counts(counts).decode("ascii")):
+    for encoded in (compressed_counts(counts), compressed_counts(counts).decode("ascii")):
         result = mask_utils.pad({"size": size, "counts": encoded}, size, (0, 0))
         assert result == {"size": list(size), "counts": compressed_counts(counts)}
         assert mask_utils.area(result) == (MAX_PIXELS if foreground else 0)
@@ -216,7 +219,7 @@ def test_pad_pixel_limit_with_existing_consumers(mask_utils, size, foreground):
 @pytest.mark.parametrize("size", [(1, MAX_PIXELS), (MAX_PIXELS, 1), (46340, 46340)])
 def test_pad_near_limit_at_bottom_right_with_existing_consumers(mask_utils, size):
     h, w = size
-    result = mask_utils.pad({"size": [1, 1], "counts": [0, 1]}, size, (w - 1, h - 1))
+    result = mask_utils.pad({"size": [1, 1], "counts": b"01"}, size, (w - 1, h - 1))
     assert result["counts"] == compressed_counts([h * w - 1, 1])
     assert mask_utils.toBbox(result).tolist() == [w - 1, h - 1, 1, 1]
     assert mask_utils.area(result) == 1
@@ -225,7 +228,7 @@ def test_pad_near_limit_at_bottom_right_with_existing_consumers(mask_utils, size
 
 @pytest.mark.parametrize("size", [(0, UINT_MAX), (UINT_MAX, 0)])
 def test_pad_empty_canvas_at_dimension_limit(mask_utils, size):
-    result = mask_utils.pad({"size": size, "counts": []}, size, (0, 0))
+    result = mask_utils.pad({"size": size, "counts": b""}, size, (0, 0))
     assert result == {"size": list(size), "counts": b"0"}
     assert mask_utils.toBbox(result).tolist() == [0, 0, 0, 0]
     assert mask_utils.area(result) == 0
@@ -236,7 +239,7 @@ def test_pad_rejects_large_total_with_representable_runs(mask_utils):
     # Representable individual runs do not make the canvas safe for consumers.
     counts = [0, UINT_MAX, 1, 1, UINT_MAX, 1]
     size = (1, sum(counts))
-    for encoded in (counts, compressed_counts(counts)):
+    for encoded in (compressed_counts(counts), compressed_counts(counts).decode("ascii")):
         with pytest.raises(OverflowError):
             mask_utils.pad({"size": size, "counts": encoded}, size, (0, 0))
 
@@ -262,7 +265,7 @@ def test_pad_rejects_large_total_with_representable_runs(mask_utils):
     ({"size": [1, UINT_MAX + 1], "counts": [UINT_MAX, 0, 1]}, (1, UINT_MAX + 1), (0, 0)),
 ])
 def test_pad_rejects_unsupported_sizes(mask_utils, rle, size, offset):
-    for counts in (rle["counts"], compressed_counts(rle["counts"]),
+    for counts in (compressed_counts(rle["counts"]),
                    compressed_counts(rle["counts"]).decode("ascii")):
         with pytest.raises(OverflowError):
             mask_utils.pad(dict(rle, counts=counts), size, offset)
@@ -289,7 +292,7 @@ def test_pad_large_canvas_under_memory_limit(mask_utils):
         if hard != resource.RLIM_INFINITY:
             limit = min(limit, hard)
         resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
-        result = mask.pad({'size': [1, 1], 'counts': [0, 1]},
+        result = mask.pad({'size': [1, 1], 'counts': b'01'},
                           (40000, 40000), (20000, 20000))
         expected = mask.frPyObjects({'size': [40000, 40000],
             'counts': [800020000, 1, 799979999]}, 40000, 40000)
@@ -298,14 +301,16 @@ def test_pad_large_canvas_under_memory_limit(mask_utils):
         assert mask.area(result) == 1
         assert mask.iou([result], [result], [0])[0, 0] == 1
         # Wide foreground passthrough must not split at every source column.
-        result = mask.pad({'size': [1, 1000000000], 'counts': [0, 1000000000]},
-                          (1, 2000000000), (500000000, 0))
+        foreground = mask.frPyObjects({'size': [1, 1000000000],
+            'counts': [0, 1000000000]}, 1, 1000000000)
+        result = mask.pad(foreground, (1, 2000000000), (500000000, 0))
         expected = mask.frPyObjects({'size': [1, 2000000000],
             'counts': [500000000, 1000000000, 500000000]}, 1, 2000000000)
         assert result == expected
         # Skipping background must not allocate per ROI column either.
-        assert mask.pad({'size': [1, 1000000000], 'counts': [1000000000]},
-                        (2, 1000000000), (0, 1))['counts'] == mask.frPyObjects(
+        background = mask.frPyObjects({'size': [1, 1000000000],
+            'counts': [1000000000]}, 1, 1000000000)
+        assert mask.pad(background, (2, 1000000000), (0, 1))['counts'] == mask.frPyObjects(
             {'size': [2, 1000000000], 'counts': [2000000000]}, 2, 1000000000)['counts']
     """)
     subprocess.run([sys.executable, "-c", script], cwd=ROOT, check=True,

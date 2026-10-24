@@ -85,7 +85,7 @@ def pad(rle, size, offset):
 
     ``size=(H, W)`` and ``offset=(x, y)`` contain nonnegative integers.
     The ROI must fit entirely inside the canvas; no clipping is performed.
-    ``rle['counts']`` may be compressed bytes/str or a sequence of integers.
+    ``rle['counts']`` must be compressed bytes/str.
     Returns a new RLE with full-canvas size and compressed bytes counts.
 
     For compatibility with existing RLE operations, ROI/canvas dimensions

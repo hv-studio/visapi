@@ -87,6 +87,10 @@ def pad(rle, size, offset):
     The ROI must fit entirely inside the canvas; no clipping is performed.
     ``rle['counts']`` may be compressed bytes/str or a sequence of integers.
     Returns a new RLE with full-canvas size and compressed bytes counts.
+
+    For compatibility with existing RLE operations, ROI/canvas dimensions
+    must fit C unsigned int and their pixel counts must not exceed
+    UINT_MAX // 2 (normally 2,147,483,647). Larger sizes raise OverflowError.
     """
     return _mask.pad(rle, size, offset)
 

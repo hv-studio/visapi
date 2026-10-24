@@ -34,8 +34,9 @@ void rleMerge( const RLE *R, RLE *M, siz n, int intersect );
 
 /* Embed R at (x,y) in an h-by-w background canvas, without clipping.
  * R and M must be distinct. On success M owns a newly allocated encoding;
- * on failure M is unchanged. Dimensions/products must fit siz and each
- * merged output count must fit uint. Space is O(output runs), not O(h*w).
+ * on failure M is unchanged. ROI/canvas dimensions must fit uint and their
+ * pixel counts must not exceed UINT_MAX/2, for compatibility with existing
+ * RLE operations. Space is O(output runs), not O(h*w).
  */
 int rlePad( const RLE *R, RLE *M, siz h, siz w, siz x, siz y );
 

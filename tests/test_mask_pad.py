@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 UINT_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_uint))) - 1
+MAX_PIXELS = UINT_MAX // 2
 SIZ_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_ulong))) - 1
 
 
@@ -199,33 +200,70 @@ def test_pad_dimension_overflow(mask_utils):
         mask_utils.pad({"size": [SIZ_MAX, 2], "counts": []}, (0, 0), (0, 0))
 
 
-@pytest.mark.parametrize("counts", [[UINT_MAX], [0, UINT_MAX]])
-def test_pad_uint_max_count_round_trip(mask_utils, counts):
+@pytest.mark.parametrize("size", [(1, MAX_PIXELS), (MAX_PIXELS, 1)])
+@pytest.mark.parametrize("foreground", [False, True])
+def test_pad_pixel_limit_with_existing_consumers(mask_utils, size, foreground):
+    counts = [0, MAX_PIXELS] if foreground else [MAX_PIXELS]
     for encoded in (counts, compressed_counts(counts), compressed_counts(counts).decode("ascii")):
-        result = mask_utils.pad({"size": [1, UINT_MAX], "counts": encoded}, (1, UINT_MAX), (0, 0))
-        assert result == {"size": [1, UINT_MAX], "counts": compressed_counts(counts)}
+        result = mask_utils.pad({"size": size, "counts": encoded}, size, (0, 0))
+        assert result == {"size": list(size), "counts": compressed_counts(counts)}
+        assert mask_utils.area(result) == (MAX_PIXELS if foreground else 0)
+        expected_bbox = [0, 0, size[1], size[0]] if foreground else [0, 0, 0, 0]
+        assert mask_utils.toBbox(result).tolist() == expected_bbox
+        assert mask_utils.iou([result], [result], [0])[0, 0] == int(foreground)
+
+
+@pytest.mark.parametrize("size", [(1, MAX_PIXELS), (MAX_PIXELS, 1), (46340, 46340)])
+def test_pad_near_limit_at_bottom_right_with_existing_consumers(mask_utils, size):
+    h, w = size
+    result = mask_utils.pad({"size": [1, 1], "counts": [0, 1]}, size, (w - 1, h - 1))
+    assert result["counts"] == compressed_counts([h * w - 1, 1])
+    assert mask_utils.toBbox(result).tolist() == [w - 1, h - 1, 1, 1]
+    assert mask_utils.area(result) == 1
+    assert mask_utils.iou([result], [result], [0])[0, 0] == 1
+
+
+@pytest.mark.parametrize("size", [(0, UINT_MAX), (UINT_MAX, 0)])
+def test_pad_empty_canvas_at_dimension_limit(mask_utils, size):
+    result = mask_utils.pad({"size": size, "counts": []}, size, (0, 0))
+    assert result == {"size": list(size), "counts": b"0"}
+    assert mask_utils.toBbox(result).tolist() == [0, 0, 0, 0]
+    assert mask_utils.area(result) == 0
 
 
 @pytest.mark.skipif(SIZ_MAX <= UINT_MAX, reason="requires 64-bit siz")
-def test_pad_large_total_with_representable_runs(mask_utils):
-    # Total area may exceed uint; every canonical run must still fit uint.
+def test_pad_rejects_large_total_with_representable_runs(mask_utils):
+    # Representable individual runs do not make the canvas safe for consumers.
     counts = [0, UINT_MAX, 1, 1, UINT_MAX, 1]
     size = (1, sum(counts))
     for encoded in (counts, compressed_counts(counts)):
-        assert mask_utils.pad({"size": size, "counts": encoded}, size, (0, 0)) == {
-            "size": list(size), "counts": compressed_counts(counts)}
+        with pytest.raises(OverflowError):
+            mask_utils.pad({"size": size, "counts": encoded}, size, (0, 0))
 
 
-@pytest.mark.skipif(SIZ_MAX <= UINT_MAX, reason="requires 64-bit siz")
 @pytest.mark.parametrize("rle,size,offset", [
+    # Review regressions: bbox position overflow and height truncated to zero.
+    ({"size": [2, 1], "counts": [0, 2]}, (65537, 65537), (65535, 0)),
+    ({"size": [1, 1], "counts": [0, 1]}, (UINT_MAX + 1, 1), (0, UINT_MAX)),
+    # At 2**31 pixels, IoU's sum of two remaining runs could wrap to zero.
+    ({"size": [1, MAX_PIXELS + 1], "counts": [0, MAX_PIXELS + 1]}, (1, MAX_PIXELS + 1), (0, 0)),
+    ({"size": [0, 0], "counts": []}, (1, MAX_PIXELS + 1), (0, 0)),
+    ({"size": [0, 0], "counts": []}, (MAX_PIXELS + 1, 1), (0, 0)),
+    ({"size": [1, MAX_PIXELS + 1], "counts": [MAX_PIXELS + 1]}, (0, 0), (0, 0)),
+    # Zero area must not bypass the per-dimension bound, for canvas or ROI.
+    ({"size": [0, 0], "counts": []}, (UINT_MAX + 1, 0), (0, 0)),
+    ({"size": [0, 0], "counts": []}, (0, UINT_MAX + 1), (0, 0)),
+    ({"size": [UINT_MAX + 1, 0], "counts": []}, (0, 0), (0, 0)),
+    ({"size": [0, UINT_MAX + 1], "counts": []}, (0, 0), (0, 0)),
     ({"size": [0, 0], "counts": []}, (1, UINT_MAX + 1), (0, 0)),
     ({"size": [1, 1], "counts": [0, 1]}, (1, UINT_MAX + 2), (0, 0)),
     ({"size": [1, 1], "counts": [0, 1]}, (1, UINT_MAX + 2), (UINT_MAX + 1, 0)),
     ({"size": [1, UINT_MAX + 1], "counts": [0, UINT_MAX, 0, 1]}, (1, UINT_MAX + 1), (0, 0)),
     ({"size": [1, UINT_MAX + 1], "counts": [UINT_MAX, 0, 1]}, (1, UINT_MAX + 1), (0, 0)),
 ])
-def test_pad_rejects_output_count_overflow(mask_utils, rle, size, offset):
-    for counts in (rle["counts"], compressed_counts(rle["counts"])):
+def test_pad_rejects_unsupported_sizes(mask_utils, rle, size, offset):
+    for counts in (rle["counts"], compressed_counts(rle["counts"]),
+                   compressed_counts(rle["counts"]).decode("ascii")):
         with pytest.raises(OverflowError):
             mask_utils.pad(dict(rle, counts=counts), size, offset)
 
@@ -242,8 +280,8 @@ def test_pad_large_canvas_under_memory_limit(mask_utils):
 
         mask.encode = mask.decode = forbidden
         mask._mask.encode = mask._mask.decode = forbidden
-        # After imports, allow only 64 MiB more virtual memory. A 60k-square
-        # bitmap alone would require 3.6 GB, independent of physical paging.
+        # After imports, allow only 64 MiB more virtual memory. A 40k-square
+        # bitmap alone would require 1.6 GB, independent of physical paging.
         with open('/proc/self/statm') as f:
             current = int(f.read().split()[0]) * os.sysconf('SC_PAGE_SIZE')
         _, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -252,10 +290,13 @@ def test_pad_large_canvas_under_memory_limit(mask_utils):
             limit = min(limit, hard)
         resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
         result = mask.pad({'size': [1, 1], 'counts': [0, 1]},
-                          (60000, 60000), (30000, 30000))
-        expected = mask.frPyObjects({'size': [60000, 60000],
-            'counts': [1800030000, 1, 1799969999]}, 60000, 60000)
+                          (40000, 40000), (20000, 20000))
+        expected = mask.frPyObjects({'size': [40000, 40000],
+            'counts': [800020000, 1, 799979999]}, 40000, 40000)
         assert result == expected
+        assert mask.toBbox(result).tolist() == [20000, 20000, 1, 1]
+        assert mask.area(result) == 1
+        assert mask.iou([result], [result], [0])[0, 0] == 1
         # Wide foreground passthrough must not split at every source column.
         result = mask.pad({'size': [1, 1000000000], 'counts': [0, 1000000000]},
                           (1, 2000000000), (500000000, 0))

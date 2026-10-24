@@ -202,7 +202,7 @@ def pad(rle, size, offset):
     if status == RLE_INVALID:
         raise ValueError('invalid RLE counts or ROI outside the canvas')
     if status == RLE_OVERFLOW:
-        raise OverflowError('RLE dimensions or counts exceed the C integer range')
+        raise OverflowError('RLE dimensions or counts exceed the supported range')
     if status == RLE_NOMEM:
         raise MemoryError('unable to allocate RLE runs')
     return _toString(result)[0]

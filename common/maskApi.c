@@ -100,7 +100,9 @@ int rlePad( const RLE *R, RLE *M, siz h, siz w, siz x, siz y ) {
   RLE out;
   int status;
   if(!R || !M || R==M || (R->m && !R->cnts)) return RLE_INVALID;
-  if((h && w>ULONG_MAX/h) || (R->h && R->w>ULONG_MAX/R->h))
+  /* Existing consumers use uint positions and sum two remaining run lengths. */
+  if(h>UINT_MAX || w>UINT_MAX || R->h>UINT_MAX || R->w>UINT_MAX ||
+     (h && w>(UINT_MAX/2)/h) || (R->h && R->w>(UINT_MAX/2)/R->h))
     return RLE_OVERFLOW;
   if(x>w || y>h || R->w>w-x || R->h>h-y) return RLE_INVALID;
   area=h*w; sourceArea=R->h*R->w;

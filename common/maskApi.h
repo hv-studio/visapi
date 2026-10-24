@@ -12,6 +12,9 @@ typedef unsigned char byte;
 typedef double* BB;
 typedef struct { siz h, w, m; uint *cnts; } RLE;
 
+/* Status codes for checked RLE operations. */
+enum { RLE_OK=0, RLE_INVALID, RLE_OVERFLOW, RLE_NOMEM };
+
 /* Initialize/destroy RLE. */
 void rleInit( RLE *R, siz h, siz w, siz m, uint *cnts );
 void rleFree( RLE *R );
@@ -28,6 +31,14 @@ void rleDecode( const RLE *R, byte *mask, siz n );
 
 /* Compute union or intersection of encoded masks. */
 void rleMerge( const RLE *R, RLE *M, siz n, int intersect );
+
+/* Embed R at (x,y) in an h-by-w background canvas, without clipping.
+ * R and M must be distinct. On success M owns a newly allocated encoding;
+ * on failure M is unchanged. ROI/canvas dimensions must fit uint and their
+ * pixel counts must not exceed UINT_MAX/2, for compatibility with existing
+ * RLE operations. Space is O(output runs), not O(h*w).
+ */
+int rlePad( const RLE *R, RLE *M, siz h, siz w, siz x, siz y );
 
 /* Compute area of encoded masks. */
 void rleArea( const RLE *R, siz n, uint *a );
@@ -57,4 +68,5 @@ void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w );
 char* rleToString( const RLE *R );
 
 /* Convert from compressed string representation of encoded mask. */
-void rleFrString( RLE *R, char *s, siz h, siz w );
+/* Returns a status code; leaves R unchanged on invalid/overflowing input. */
+int rleFrString( RLE *R, const char *s, siz h, siz w );

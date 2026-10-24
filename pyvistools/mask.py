@@ -31,6 +31,7 @@ import pyvistools._mask as _mask
 #  encode         - Encode binary masks using RLE.
 #  decode         - Decode binary masks encoded via RLE.
 #  merge          - Compute union or intersection of encoded masks.
+#  pad            - Embed one ROI RLE in a background canvas without decoding.
 #  iou            - Compute intersection over union between masks.
 #  area           - Compute area of encoded masks.
 #  toBbox         - Get bounding boxes surrounding encoded masks.
@@ -40,6 +41,7 @@ import pyvistools._mask as _mask
 #  Rs     = encode( masks )
 #  masks  = decode( Rs )
 #  R      = merge( Rs, intersect=false )
+#  R      = pad( roi, (height, width), (x, y) )
 #  o      = iou( dt, gt, iscrowd )
 #  a      = area( Rs )
 #  bbs    = toBbox( Rs )
@@ -76,6 +78,21 @@ import pyvistools._mask as _mask
 iou         = _mask.iou
 merge       = _mask.merge
 frPyObjects = _mask.frPyObjects
+
+def pad(rle, size, offset):
+    """
+    Embed one COCO ROI RLE in a background canvas without decoding.
+
+    ``size=(H, W)`` and ``offset=(x, y)`` contain nonnegative integers.
+    The ROI must fit entirely inside the canvas; no clipping is performed.
+    ``rle['counts']`` must be compressed bytes/str.
+    Returns a new RLE with full-canvas size and compressed bytes counts.
+
+    For compatibility with existing RLE operations, ROI/canvas dimensions
+    must fit C unsigned int and their pixel counts must not exceed
+    UINT_MAX // 2 (normally 2,147,483,647). Larger sizes raise OverflowError.
+    """
+    return _mask.pad(rle, size, offset)
 
 def encode(bimask):
     if len(bimask.shape) == 3:

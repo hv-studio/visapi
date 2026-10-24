@@ -11,6 +11,7 @@
 __author__ = 'tsungyi'
 
 import sys
+from operator import index
 PYTHON_VERSION = sys.version_info[0]
 
 # import both Python-level and C-level symbols of Numpy
@@ -38,10 +39,16 @@ cdef extern from "maskApi.h":
         siz w,
         siz m,
         uint* cnts,
+    enum:
+        RLE_OK
+        RLE_INVALID
+        RLE_OVERFLOW
+        RLE_NOMEM
     void rlesInit( RLE **R, siz n )
     void rleEncode( RLE *R, const byte *M, siz h, siz w, siz n ) nogil
     void rleDecode( const RLE *R, byte *mask, siz n ) nogil
     void rleMerge( const RLE *R, RLE *M, siz n, int intersect ) nogil
+    int rlePad( const RLE *R, RLE *M, siz h, siz w, siz x, siz y ) nogil
     void rleArea( const RLE *R, siz n, uint *a ) nogil
     void rleIou( RLE *dt, RLE *gt, siz m, siz n, byte *iscrowd, double *o ) nogil
     void bbIou( BB dt, BB gt, siz m, siz n, byte *iscrowd, double *o ) nogil
@@ -49,7 +56,7 @@ cdef extern from "maskApi.h":
     void rleFrBbox( RLE *R, const BB bb, siz h, siz w, siz n ) nogil
     void rleFrPoly( RLE *R, const double *xy, siz k, siz h, siz w ) nogil
     char* rleToString( const RLE *R ) nogil
-    void rleFrString( RLE *R, char *s, siz h, siz w ) nogil
+    int rleFrString( RLE *R, const char *s, siz h, siz w ) nogil
 
 # python class to wrap RLE array in C
 # the class handles the memory allocation and deallocation
@@ -108,6 +115,8 @@ def _toString(RLEs Rs):
     for i in range(n):
         with nogil:
             c_string = rleToString( <RLE*> &Rs._R[i] )
+        if c_string == NULL:
+            raise MemoryError('unable to allocate compressed RLE counts')
         py_string = c_string
         objs.append({
             'size': [Rs._R[i].h, Rs._R[i].w],
@@ -123,6 +132,7 @@ def _frString(rleObjs):
     cdef bytes py_string
     cdef char* c_string
     cdef siz h, w, c_i
+    cdef int status
     for i, obj in enumerate(rleObjs):
         if PYTHON_VERSION == 2:
             py_string = str(obj['counts']).encode('utf8')
@@ -134,7 +144,13 @@ def _frString(rleObjs):
         h, w = obj['size'][0], obj['size'][1]
         c_i = i
         with nogil:
-            rleFrString( <RLE*> &Rs._R[c_i], <char*> c_string, h, w )
+            status = rleFrString( <RLE*> &Rs._R[c_i], c_string, h, w )
+        if status == RLE_INVALID:
+            raise ValueError('invalid compressed RLE counts')
+        if status == RLE_OVERFLOW:
+            raise OverflowError('RLE count exceeds the C unsigned int range')
+        if status == RLE_NOMEM:
+            raise MemoryError('unable to allocate RLE runs')
     return Rs
 
 # encode mask to RLEs objects
@@ -163,6 +179,24 @@ def merge(rleObjs, int intersect=0):
         rleMerge(<RLE*>Rs._R, <RLE*> R._R, <siz> Rs._n, intersect)
     obj = _toString(R)[0]
     return obj
+
+def pad(rle, size, offset):
+    cdef siz h, w, x, y
+    cdef RLEs source
+    cdef RLEs result = RLEs(1)
+    cdef int status
+    h, w = map(index, size)
+    x, y = map(index, offset)
+    source = _frString([rle])
+    with nogil:
+        status = rlePad(source._R, result._R, h, w, x, y)
+    if status == RLE_INVALID:
+        raise ValueError('invalid RLE counts or ROI outside the canvas')
+    if status == RLE_OVERFLOW:
+        raise OverflowError('RLE dimensions or counts exceed the supported range')
+    if status == RLE_NOMEM:
+        raise MemoryError('unable to allocate RLE runs')
+    return _toString(result)[0]
 
 def area(rleObjs):
     cdef RLEs Rs = _frString(rleObjs)
